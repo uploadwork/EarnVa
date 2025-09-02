@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>👨‍💼 Admin Dashboard</title>
+  <style>
+    body { margin:0; font-family: Arial, sans-serif; background:#FFD84D; color:#000; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 20px; }
+    h1 { text-align:center; margin-bottom: 10px; }
+    .section { background:#fff; border:1px solid #ccc; border-radius:10px; padding:16px; margin:12px 0; }
+    .section h2 { margin:0 0 10px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:10px; }
+    .card { border:1px solid #ddd; border-radius:8px; padding:10px; background:#fafafa; }
+    .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .row input[type="number"] { width:100px; padding:6px; }
+    .btn { padding:6px 10px; border:none; border-radius:6px; cursor:pointer; font-weight:bold; }
+    .add { background:green; color:#fff; }
+    .remove { background:#dc3545; color:#fff; }
+    .pin { background:#000; color:#fff; }
+    .ghost { background:#e9ecef; }
+    .danger { background:#dc3545; color:#fff; }
+    .ok { background:#000; color:#fff; }
+
+    .loginBox { text-align:center; }
+    .error { color:red; margin-top:10px; }
+
+    /* Sticky popup when user marks Paid */
+    .popup {
+      position: fixed; right: 18px; bottom: 18px; z-index: 9999;
+      background:#fff; border:1px solid #333; border-radius:10px; padding:12px; width: 320px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    }
+    .popup h4 { margin:0 0 8px; }
+    .popup .row { margin-top:8px; display:flex; gap:8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>👨‍💼 Admin Dashboard</h1>
+
+    <div id="loginBox" class="section loginBox">
+      <p>Enter Admin Password:</p>
+      <input type="password" id="adminPass" placeholder="Password"/>
+      <button class="btn ok" id="enterAdmin">Enter</button>
+      <div id="errorBox" class="error"></div>
+    </div>
+
+    <div id="content" style="display:none;">
+      <!-- Users Section -->
+      <div class="section">
+        <h2>Users</h2>
+        <div id="userList" class="grid">Loading users...</div>
+      </div>
+
+      <!-- Pin Requests Section -->
+      <div class="section">
+        <h2>Pin Requests</h2>
+        <div id="pinRequests">Loading requests...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Paid notification popup -->
+  <div id="paidPopup" class="popup" style="display:none;">
+    <h4>Payment Marked As Paid</h4>
+    <div id="paidPopupBody"></div>
+    <div class="row">
+      <button class="btn ghost" id="closePaidPopup">Dismiss</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import {
+      getFirestore, collection, getDocs, doc, getDoc, updateDoc, deleteDoc, addDoc,
+      onSnapshot, query, where, orderBy, serverTimestamp, setDoc
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+    // Firebase config (unchanged)
+    const firebaseConfig = {
+      apiKey: "AIzaSyBT-uB0tNUGOZGC8V2I4iP8QUXbXOHu44I",
+      authDomain: "newbie-d6a5c.firebaseapp.com",
+      projectId: "newbie-d6a5c",
+      storageBucket: "newbie-d6a5c.firebasestorage.app",
+      messagingSenderId: "931411577096",
+      appId: "1:931411577096:web:8380459a4564c83ff8c4bd"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const ADMIN_PASSWORD = "divine45$";
+
+    const loginBox = document.getElementById("loginBox");
+    const errorBox = document.getElementById("errorBox");
+    const content = document.getElementById("content");
+    const userList = document.getElementById("userList");
+    const pinRequests = document.getElementById("pinRequests");
+
+    const paidPopup = document.getElementById("paidPopup");
+    const paidPopupBody = document.getElementById("paidPopupBody");
+    const closePaidPopup = document.getElementById("closePaidPopup");
+
+    function fmtDate(ts) {
+      try {
+        const d = ts?.toDate ? ts.toDate() : (ts instanceof Date ? ts : new Date());
+        return d.toLocaleString("en-US", { year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" });
+      } catch { return ""; }
+    }
+
+    document.getElementById("enterAdmin").onclick = () => {
+      const pass = (document.getElementById("adminPass").value || "").trim();
+      if (pass === ADMIN_PASSWORD) {
+        loginBox.style.display = "none";
+        content.style.display = "block";
+        boot();
+      } else {
+        errorBox.textContent = "❌ Incorrect password.";
+      }
+    };
+
+    // ---------- Users ----------
+    async function loadUsers() {
+      userList.innerHTML = "";
+      const snap = await getDocs(collection(db, "users"));
+      if (snap.empty) {
+        userList.innerHTML = "<div class='card'>No users yet.</div>";
+        return;
+      }
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        const name = docSnap.id;
+        const bal = data.earnings || 0;
+        const pin = data.pin || "Not set";
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <strong>${name}</strong><br>
+          Balance: $${(bal || 0).toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2})}<br>
+          Pin: ${pin}
+          <div class="row" style="margin-top:8px;">
+            <input type="number" step="0.01" id="amt-${name}" placeholder="Amount"/>
+            <button class="btn add" data-u="${name}">Add</button>
+            <button class="btn remove" data-u="${name}">Remove</button>
+            <button class="btn pin" data-u="${name}">Generate Pin</button>
+          </div>
+        `;
+        userList.appendChild(card);
+      });
+
+      // attach handlers
+      userList.querySelectorAll(".btn.add").forEach(btn=>{
+        btn.onclick = async () => {
+          const u = btn.dataset.u;
+          const amt = parseFloat(document.getElementById(`amt-${u}`).value);
+          if (isNaN(amt)) return alert("Enter a valid amount.");
+          const ref = doc(db, "users", u);
+          const snap = await getDoc(ref);
+          const current = snap.exists()? (snap.data().earnings||0) : 0;
+          await updateDoc(ref, { earnings: current + amt });
+          alert("Balance added ✅");
+          loadUsers();
+        };
+      });
+      userList.querySelectorAll(".btn.remove").forEach(btn=>{
+        btn.onclick = async () => {
+          const u = btn.dataset.u;
+          const amt = parseFloat(document.getElementById(`amt-${u}`).value);
+          if (isNaN(amt)) return alert("Enter a valid amount.");
+          const ref = doc(db, "users", u);
+          const snap = await getDoc(ref);
+          const current = snap.exists()? (snap.data().earnings||0) : 0;
+          await updateDoc(ref, { earnings: Math.max(0, current - amt) });
+          alert("Balance removed ✅");
+          loadUsers();
+        };
+      });
+      userList.querySelectorAll(".btn.pin").forEach(btn=>{
+        btn.onclick = async () => {
+          const u = btn.dataset.u;
+          const pin = Math.floor(100000 + Math.random() * 900000).toString();
+          await setDoc(doc(db, "users", u), { pin }, { merge:true });
+          alert(`New Pin for ${u}: ${pin}`);
+          loadUsers();
+        };
+      });
+    }
+
+    // ---------- Pin Requests ----------
+    async function renderPinRequests() {
+      pinRequests.innerHTML = "";
+      const qAll = query(collection(db, "pinRequests"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(qAll);
+      if (snap.empty) {
+        pinRequests.innerHTML = "<div class='card'>No pin requests.</div>";
+        return;
+      }
+      snap.forEach((docSnap) => {
+        const r = docSnap.data();
+        const id = docSnap.id;
+        const created = fmtDate(r.createdAt);
+        const responded = r.respondedAt ? fmtDate(r.respondedAt) : "-";
+        const decided = r.userDecidedAt ? fmtDate(r.userDecidedAt) : "-";
+
+        const div = document.createElement("div");
+        div.className = "card";
+        div.innerHTML = `
+          <strong>User:</strong> ${r.username}<br>
+          <strong>Status:</strong> ${r.status}<br>
+          <strong>Created:</strong> ${created}<br>
+          <strong>Responded:</strong> ${responded}<br>
+          <strong>User Decided:</strong> ${decided}<br>
+          ${r.adminNote ? `<div style="margin-top:6px;"><strong>Note:</strong> ${r.adminNote}</div>` : ""}
+          ${r.paymentDetails ? `<div style="margin-top:6px;"><strong>Payment Details:</strong><br>${(r.paymentDetails||"").replace(/\n/g,"<br>")}</div>` : ""}
+          <div class="row" style="margin-top:10px;">
+            <button class="btn ghost" data-act="respond" data-id="${id}">Respond</button>
+            <button class="btn danger" data-act="delete" data-id="${id}">Delete</button>
+          </div>
+        `;
+        pinRequests.appendChild(div);
+      });
+
+      // Handlers: Respond & Delete
+      pinRequests.querySelectorAll("button[data-act='respond']").forEach(b=>{
+        b.onclick = async () => {
+          const id = b.dataset.id;
+          const note = prompt("Enter a note for the user (e.g., instructions):", "");
+          if (note === null) return; // cancelled
+          const pay = prompt("Enter payment details (UPI/Wallet/Bank/GCash etc):", "");
+          if (pay === null) return;
+          await updateDoc(doc(db, "pinRequests", id), {
+            status: "responded",
+            adminNote: note,
+            paymentDetails: pay,
+            respondedAt: serverTimestamp()
+          });
+          alert("Response sent to user ✅");
+          renderPinRequests();
+        };
+      });
+      pinRequests.querySelectorAll("button[data-act='delete']").forEach(b=>{
+        b.onclick = async () => {
+          const id = b.dataset.id;
+          if (!confirm("Delete this request?")) return;
+          await deleteDoc(doc(db, "pinRequests", id));
+          alert("Request deleted ✅");
+          renderPinRequests();
+        };
+      });
+    }
+
+    // Live notify when any request becomes "paid"
+    function listenForPaid() {
+      const qPaid = query(collection(db, "pinRequests"), where("status","==","paid"));
+      onSnapshot(qPaid, (snapshot) => {
+        snapshot.docChanges().forEach((chg) => {
+          if (chg.type === "added" || chg.type === "modified") {
+            const r = chg.doc.data();
+            const when = fmtDate(r.userDecidedAt || r.respondedAt || r.createdAt);
+            paidPopupBody.innerHTML = `
+              <div><strong>${r.username}</strong> marked payment as <strong>PAID</strong>.</div>
+              <div style="font-size:12px;opacity:.8;margin-top:4px;">${when}</div>
+            `;
+            paidPopup.style.display = "block"; // stays until admin dismisses
+          }
+        });
+      });
+      closePaidPopup.onclick = () => paidPopup.style.display = "none";
+    }
+
+    async function boot() {
+      await loadUsers();
+      await renderPinRequests();
+      listenForPaid();
+
+      // Also refresh user list & requests in the background every 20s to reflect changes
+      setInterval(loadUsers, 20000);
+      setInterval(renderPinRequests, 20000);
+    }
+  </script>
+</body>
+</html>
